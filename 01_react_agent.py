@@ -4,112 +4,106 @@ LEKTION 1: DER REACT AGENT — Das Fundament von allem
 =============================================================================
 
 ReAct = Reason + Act
-Das ist das wichtigste Pattern das du kennen musst.
 
-Die Idee: Anstatt direkt zu antworten, denkt der Agent in Schritten:
-    1. THOUGHT  — "Was muss ich tun? Was weiß ich schon?"
-    2. ACTION   — "Ich rufe Tool X mit Argument Y auf"
-    3. OBSERVATION — "Das Tool hat Z zurückgegeben"
-    4. ... wiederholen bis ...
-    5. ANSWER   — "Jetzt hab ich genug Info, hier ist die Antwort"
-
-Warum ist das so mächtig?
-→ Der Agent kann komplexe Probleme in Schritte zerlegen
-→ Er kann Fehler erkennen und korrigieren
-→ Er ist nicht auf sein Training-Wissen beschränkt — er kann Tools nutzen
+OPENAI vs ANTHROPIC — die wichtigsten Unterschiede:
+┌─────────────────────┬──────────────────────────┬──────────────────────────┐
+│ Feature             │ OpenAI                   │ Anthropic                │
+├─────────────────────┼──────────────────────────┼──────────────────────────┤
+│ Tool-Schema         │ {"type":"function",...}  │ {"name":..,"input_schema"│
+│ Tool-Aufruf Signal  │ finish_reason="tool_calls│ stop_reason="tool_use"   │
+│ Tool-Ergebnis Role  │ role="tool"              │ role="user" (als Liste)  │
+│ Tool-Args Format    │ json.loads(tc.function   │ block.input (dict)       │
+│                     │ .arguments)              │                          │
+│ Response Text       │ choices[0].message       │ response.content[0].text │
+│ Token Tracking      │ prompt_tokens            │ input_tokens             │
+└─────────────────────┴──────────────────────────┴──────────────────────────┘
 =============================================================================
 """
 
 import json
-import anthropic
+from openai import OpenAI
 
-# Anthropic Client — das Tor zur Claude API
-client = anthropic.Anthropic()  # liest ANTHROPIC_API_KEY aus Environment
+# OpenAI Client — liest OPENAI_API_KEY aus Environment
+client = OpenAI()
 
 # =============================================================================
 # TOOLS DEFINIEREN
-# Tools sind Funktionen die der Agent aufrufen darf.
-# Claude bekommt die "Beschreibung" und entscheidet SELBST wann er welches nutzt.
+# OpenAI Format: Tool ist in ein "function"-Objekt eingewickelt
+# Anthropic hatte direkt "input_schema" — hier heißt es "parameters"
 # =============================================================================
 
 TOOLS = [
     {
-        "name": "calculator",
-        "description": "Führt mathematische Berechnungen durch. Nutze das für alle Rechnungen.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "expression": {
-                    "type": "string",
-                    "description": "Mathematischer Ausdruck, z.B. '2 + 2' oder '100 * 0.19'"
-                }
-            },
-            "required": ["expression"]
+        "type": "function",                          # OpenAI braucht diesen Wrapper
+        "function": {
+            "name": "calculator",
+            "description": "Führt mathematische Berechnungen durch. Nutze das für alle Rechnungen.",
+            "parameters": {                          # Anthropic: "input_schema"
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "Mathematischer Ausdruck, z.B. '2 + 2' oder '100 * 0.19'"
+                    }
+                },
+                "required": ["expression"]
+            }
         }
     },
     {
-        "name": "get_weather",
-        "description": "Gibt das aktuelle Wetter für eine Stadt zurück.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "city": {
-                    "type": "string",
-                    "description": "Name der Stadt"
-                }
-            },
-            "required": ["city"]
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Gibt das aktuelle Wetter für eine Stadt zurück.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "Name der Stadt"
+                    }
+                },
+                "required": ["city"]
+            }
         }
     },
     {
-        "name": "search_knowledge",
-        "description": "Durchsucht eine interne Wissensdatenbank nach Fakten.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Suchanfrage"
-                }
-            },
-            "required": ["query"]
+        "type": "function",
+        "function": {
+            "name": "search_knowledge",
+            "description": "Durchsucht eine interne Wissensdatenbank nach Fakten.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Suchanfrage"
+                    }
+                },
+                "required": ["query"]
+            }
         }
     }
 ]
 
-# =============================================================================
-# TOOL EXECUTOR — die echte Logik hinter den Tools
-# In Production würden hier echte APIs angesprochen (OpenWeatherMap, etc.)
-# Hier simulieren wir sie für's Lernen.
-# =============================================================================
 
 def execute_tool(tool_name: str, tool_input: dict) -> str:
-    """
-    Führt ein Tool aus und gibt das Ergebnis als String zurück.
-    Der Agent sieht nur diesen String — nicht den Code dahinter.
-    """
-
     if tool_name == "calculator":
         try:
-            # eval() ist normalerweise gefährlich — hier nur für Demo!
-            # In Production: math-Parser-Library nutzen
             result = eval(tool_input["expression"])
             return f"Ergebnis: {result}"
         except Exception as e:
             return f"Fehler bei Berechnung: {e}"
 
     elif tool_name == "get_weather":
-        # Simuliertes Wetter (in echt: API-Call)
         weather_db = {
             "berlin": "18°C, bewölkt, leichter Wind",
             "münchen": "22°C, sonnig",
             "hamburg": "14°C, regnerisch",
         }
-        city = tool_input["city"].lower()
-        return weather_db.get(city, f"Keine Daten für {tool_input['city']}")
+        return weather_db.get(tool_input["city"].lower(), f"Keine Daten für {tool_input['city']}")
 
     elif tool_name == "search_knowledge":
-        # Simulierte Wissensdatenbank
         knowledge = {
             "python": "Python ist eine interpretierte Hochsprache, erstellt 1991 von Guido van Rossum.",
             "claude": "Claude ist ein KI-Assistent von Anthropic, erschienen 2023.",
@@ -124,103 +118,71 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
     return f"Unbekanntes Tool: {tool_name}"
 
 
-# =============================================================================
-# DER AGENT — die Hauptschleife
-# Das ist der "Agentic Loop" — läuft so lange bis der Agent fertig ist.
-# =============================================================================
-
 def run_agent(user_message: str, verbose: bool = True) -> str:
     """
-    Führt den ReAct-Agenten aus.
+    ReAct Loop mit OpenAI.
 
-    Der Loop:
-    1. Schicke Nachricht an Claude
-    2. Claude antwortet entweder mit:
-       a) stop_reason="tool_use" → Agent will ein Tool aufrufen
-       b) stop_reason="end_turn" → Agent ist fertig, hat eine Antwort
-    3. Bei tool_use: Tool ausführen, Ergebnis zurückschicken → zurück zu 1
-    4. Bei end_turn: Fertig!
+    OpenAI Flow:
+    1. API Call
+    2. finish_reason == "tool_calls"  → Tool ausführen
+       finish_reason == "stop"        → Fertig (Anthropic: "end_turn")
+    3. Tool-Ergebnis als role="tool" Message zurückschicken
+       (Anthropic: als role="user" mit type="tool_result")
     """
-
-    # Conversation History — das "Gedächtnis" für diesen Durchlauf
     messages = [{"role": "user", "content": user_message}]
 
     if verbose:
-        print(f"\n{'='*60}")
-        print(f"USER: {user_message}")
-        print(f"{'='*60}")
+        print(f"\n{'='*60}\nUSER: {user_message}\n{'='*60}")
 
-    # Agentic Loop — maximal 10 Runden (Schutz vor Endlosschleifen)
     for step in range(10):
-
-        # Claude aufrufen
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",  # Haiku = schnell + günstig für Lernen
-            max_tokens=1024,
-            tools=TOOLS,           # Tools übergeben — Claude entscheidet ob/welche
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",        # günstig + schnell, wie claude-haiku
+            tools=TOOLS,
             messages=messages
         )
 
+        message = response.choices[0].message    # OpenAI: choices[0].message
+        finish_reason = response.choices[0].finish_reason
+
         if verbose:
-            print(f"\n[Schritt {step + 1}] stop_reason={response.stop_reason}")
+            print(f"\n[Schritt {step + 1}] finish_reason={finish_reason}")
 
-        # --- FALL A: Claude will ein Tool aufrufen ---
-        if response.stop_reason == "tool_use":
+        # --- FALL A: Tool aufrufen ---
+        if finish_reason == "tool_calls":         # Anthropic: "tool_use"
+            messages.append(message)              # Assistenten-Message zur History
 
-            # Antwort zur History hinzufügen (wichtig für Kontext!)
-            messages.append({"role": "assistant", "content": response.content})
+            for tc in message.tool_calls:         # Anthropic: response.content blocks
+                tool_name = tc.function.name
+                tool_input = json.loads(tc.function.arguments)  # Anthropic: block.input (dict)
 
-            # Alle Tool-Calls aus der Antwort verarbeiten
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    if verbose:
-                        print(f"  → Tool: {block.name}({block.input})")
+                if verbose:
+                    print(f"  → Tool: {tool_name}({tool_input})")
 
-                    # Tool ausführen
-                    result = execute_tool(block.name, block.input)
+                result = execute_tool(tool_name, tool_input)
 
-                    if verbose:
-                        print(f"  ← Ergebnis: {result}")
+                if verbose:
+                    print(f"  ← Ergebnis: {result}")
 
-                    # Ergebnis sammeln
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,  # ID muss matchen!
-                        "content": result
-                    })
+                # Tool-Ergebnis zurückschicken
+                # OpenAI: eigene "tool" role
+                # Anthropic: role="user" mit type="tool_result" in einer Liste
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,        # muss zur tool_call ID passen
+                    "content": result
+                })
 
-            # Tool-Ergebnisse zurück an Claude schicken
-            messages.append({"role": "user", "content": tool_results})
-
-        # --- FALL B: Claude ist fertig ---
-        elif response.stop_reason == "end_turn":
-            # Finale Antwort aus dem Text-Block extrahieren
-            final_answer = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    final_answer += block.text
-
+        # --- FALL B: Fertig ---
+        elif finish_reason == "stop":             # Anthropic: "end_turn"
+            final = message.content or ""
             if verbose:
-                print(f"\nANTWORT: {final_answer}")
+                print(f"\nANTWORT: {final}")
+            return final
 
-            return final_answer
+    return "Maximale Schritte erreicht."
 
-    return "Agent hat maximale Schritte erreicht ohne Antwort."
-
-
-# =============================================================================
-# DEMO — probier's aus
-# =============================================================================
 
 if __name__ == "__main__":
-    print("\n🤖 ReAct Agent Demo\n")
-
-    # Einfache Rechnung — Agent nutzt calculator
+    print("\n🤖 ReAct Agent Demo (OpenAI)\n")
     run_agent("Was ist 347 * 19 + 500?")
-
-    # Mehrere Tools nötig — Agent plant selbst
     run_agent("Wie ist das Wetter in Berlin und was ist 15% von 200 Euro?")
-
-    # Wissen + Berechnung kombiniert
-    run_agent("Erkläre mir kurz was ReAct ist und rechne 2^10 aus.")
